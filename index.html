@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="UTF-8">
+    <title>Hertzer-proxmox-kubernetes-install-guide by stump201</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css" href="stylesheets/normalize.css" media="screen">
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,700' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" type="text/css" href="stylesheets/stylesheet.css" media="screen">
+    <link rel="stylesheet" type="text/css" href="stylesheets/github-light.css" media="screen">
+  </head>
+  <body>
+    <section class="page-header">
+      <h1 class="project-name">Hertzer-proxmox-kubernetes-install-guide</h1>
+      <h2 class="project-tagline">How to setup proxmox on a dedicated hertzer server &amp; Create a kubernetes cluster </h2>
+      <a href="https://github.com/stump201/hertzer-proxmox-kubernetes-install-guide" class="btn">View on GitHub</a>
+      <a href="https://github.com/stump201/hertzer-proxmox-kubernetes-install-guide/zipball/master" class="btn">Download .zip</a>
+      <a href="https://github.com/stump201/hertzer-proxmox-kubernetes-install-guide/tarball/master" class="btn">Download .tar.gz</a>
+    </section>
+
+    <section class="main-content">
+      <h1>
+<a id="installing-kubernetes-on-proxox" class="anchor" href="#installing-kubernetes-on-proxox" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Installing Kubernetes on Proxox</h1>
+
+<p>For this example i shall be using a dedicated server from Hertzner.<a href="https://www.hetzner.de/en/">https://www.hetzner.de/en/</a>. A shout out to hetzner if your looking for cheap and beefy dedicated hosting then these guys are your best bet.</p>
+
+<h1>
+<a id="setting-up-the-hertzer-server" class="anchor" href="#setting-up-the-hertzer-server" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Setting up the Hertzer server</h1>
+
+<p>This guide assumes your server has Debian 8 (Jessie installed)</p>
+
+<h4>
+<a id="config-when-tested" class="anchor" href="#config-when-tested" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Config when tested</h4>
+
+<p>Intel Core i7-920</p>
+
+<p>HDD2x HDD 2,0 TB SATA Enterprise</p>
+
+<p>RAM6x RAM DDR3 8192 MB = 42 GB</p>
+
+<h2>
+<a id="step-one---install-proxmox" class="anchor" href="#step-one---install-proxmox" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Step one - Install Proxmox</h2>
+
+<p>You will begin by creating a new apt source for Proxmox</p>
+
+<div class="highlight highlight-source-shell"><pre>vim /etc/apt/sources.list.d/proxmox.list</pre></div>
+
+<p>Once you have added the new apt soource you will add the repo key</p>
+
+<div class="highlight highlight-source-shell"><pre>wget -O- <span class="pl-s"><span class="pl-pds">"</span>http://download.proxmox.com/debian/key.asc<span class="pl-pds">"</span></span> <span class="pl-k">|</span> apt-key add -</pre></div>
+
+<p>You will now need to update the system repos</p>
+
+<div class="highlight highlight-source-shell"><pre>apt-get update <span class="pl-k">&amp;&amp;</span> apt-get dist-upgrade</pre></div>
+
+<p>Now you will need to install the Proxmox VE kernel</p>
+
+<div class="highlight highlight-source-shell"><pre>pve-firmware pve-kernel-4.4.8-1-pve pve-headers-4.4.8-1-pve</pre></div>
+
+<p>Now reboot the machine to load in the new kernel, </p>
+
+<p>Once the machine is in an up state you can install core the main Proxmox application.</p>
+
+<div class="highlight highlight-source-shell"><pre>apt-get install proxmox-ve</pre></div>
+
+<p>Once again reboot your machine, When the machine is once again in an upstate you will be able to access the web-ui for proxmox https://{YOUR_IP}:8006/. You will be able to login with your root credentials. </p>
+
+<p>WHOLLA you have Proxmox installed and running, You you will need to configure all the networking.</p>
+
+<h3>
+<a id="step-two---networking" class="anchor" href="#step-two---networking" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Step two - Networking</h3>
+
+<p>Your eth0 interface should have already been pre-configured</p>
+
+<div class="highlight highlight-source-shell"><pre>auto  eth0
+iface eth0 inet static
+  address   PUBLIC_IP
+  netmask   255.255.255.192
+  gateway   GATEWAY_IP
+  <span class="pl-c"># default route to access subnet</span>
+  up route add -net NET_IP netmask 255.255.255.192 gw GATEWAY_IP eth0
+</pre></div>
+
+<p>Now we will need to create an internal network for virtual machines to connect and communicate with, This will be the backbone of the entire cluster. We will accomplish this by creating a linux bridge.</p>
+
+<div class="highlight highlight-source-shell"><pre>auto vmbr0
+iface vmbr1 inet static
+    address 10.20.30.1
+    netmask 255.255.255.0
+    bridge_ports none
+    bridge_stp off
+    bridge_fd 0
+    post-up iptables -t nat -A POSTROUTING -s <span class="pl-s"><span class="pl-pds">'</span>10.20.30.0/24<span class="pl-pds">'</span></span> -o eth0 -j MASQUERADE
+    post-down iptables -t nat -D POSTROUTING -s <span class="pl-s"><span class="pl-pds">'</span>10.20.30.0/24<span class="pl-pds">'</span></span> -o eth0 -j MASQUERADE
+</pre></div>
+
+<p>Now that we have the interfaces configured we need to configure the host server to act as our router, As such we need to make sure the kernel has packet forwarding enabled.</p>
+
+<div class="highlight highlight-source-shell"><pre>vim /etc/sysctl.conf</pre></div>
+
+<p>Only alter/uncomment these lines</p>
+
+<div class="highlight highlight-source-shell"><pre>net.ipv4.ip_forward=1
+net.ipv6.conf.all.forwarding=1</pre></div>
+
+<p>Lastly you will need to ensure we dont send ICPM redirect messages</p>
+
+<div class="highlight highlight-source-shell"><pre>vim /etc/sysctl.con</pre></div>
+
+<p>I need to give a shout out to <a href="https://blog.no-panic.at/2016/08/09/proxmox-on-debian-at-hetzner-with-multiple-ip-addresses/">https://blog.no-panic.at/2016/08/09/proxmox-on-debian-at-hetzner-with-multiple-ip-addresses/</a> this helped me massivly trying to figure this out</p>
+
+<div class="highlight highlight-source-shell"><pre>net.ipv4.conf.all.send_redirects=0</pre></div>
+
+<p>Finally reboot the host and your good to go !</p>
+
+<h3>
+<a id="step-three---creating-the-vms" class="anchor" href="#step-three---creating-the-vms" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Step three - Creating the vms</h3>
+
+<p>Now you have your host networking setup your ready to create your virtual machines, for this setup we will be creating a cluster of 3.</p>
+
+<p>The layout will be,</p>
+
+<div class="highlight highlight-source-shell"><pre>node-01 10.20.30.101
+node-02 10.20.30.102
+node-03 10.20.30.103</pre></div>
+
+<p>We will be using ubuntu 16.04 for each node, to start ssh into your main Proxmox box and download the Ubuntu ISO the Proxmox template directory, This is so Proxmox can see the ISO to mount it.</p>
+
+<div class="highlight highlight-source-shell"><pre><span class="pl-c1">cd</span> /var/lib/vz/template/iso
+wget http://releases.ubuntu.com/16.04.1/ubuntu-16.04.1-server-amd64.iso<span class="pl-k">?</span>_ga=1.150784255.852713614.1480375703
+mv ubuntu-16.04.1-server-amd64.iso<span class="pl-k">?</span>_ga=1.150784255.852713614.1480375703 ubuntu-16.04.1-server-amd64.iso</pre></div>
+
+<p>You will now be able to select this ISO when you create your VMS.</p>
+
+<p>Now login to your Proxmox web-ui https://{MAIN_IP}:8006/ with your system credentials.</p>
+
+<ul>
+<li>Input the hostname, e.g node-01</li>
+<li>For OS select linux 4.X/3.X/2.6</li>
+<li>For CD/DVD select from the ISO select menu your downloaded ISO</li>
+<li>For Hard Disk i recommend 200GB per VM, Space permitting.</li>
+<li>For CPU use 1 core, Cpu spec permitting.</li>
+<li>For Memory 4GB, Again memory permitting.</li>
+<li>For Networking select NAT mode</li>
+<li>Then confirm</li>
+</ul>
+
+<p>Now you will also need to add one more network adapter, This adapter will utilize the bridge we created in the previous section.</p>
+
+<ul>
+<li>Select the new VM from the "Server View"</li>
+<li>Find the Hardware option</li>
+<li>Select "Add" and select "Network Device"</li>
+<li>We need a "Bridged mode" interface, select bridge vmbr0.</li>
+<li>Change the "Model" to Intel E1000. These are issues with the standard virtualised network drivers.</li>
+<li>Add</li>
+</ul>
+
+<p>Now you can turn on your VM.</p>
+
+<p>Install ubuntu as you normally would, By be sure to use the NAT adapter when you install. We will configure the Bridge adapter later.</p>
+
+<p>You will need to repeat this step three times for each VM. Or you can create a template from the first VM you created and clone it three times.</p>
+
+<h3>
+<a id="step-four---configure-vm-network" class="anchor" href="#step-four---configure-vm-network" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Step four - Configure VM Network</h3>
+
+<p>Once ubuntu is installed you will need to setup the networking for each VM. Connect to node-01 with VNC from the web-ui and login.</p>
+
+<p>Next you will need to configure the adapters, Open up /etc/network/interfaces</p>
+
+<div class="highlight highlight-source-shell"><pre>vim /etc/network/interfaces
+
+auto ens18
+iface ens18 inet dhcp</pre></div>
+
+<p>Your NAT adapter should have already been configured for you, We will now add the Bridged adapter. Add the below to the config.</p>
+
+<div class="highlight highlight-source-shell"><pre>vim /etc/network/interfaces
+
+ADD THIS
+
+auto ens19
+iface ens19 inet static
+        address 10.20.30.101
+        netmask 255.255.255.0
+        gateway 10.20.30.1</pre></div>
+
+<p>Now restart the networking service</p>
+
+<div class="highlight highlight-source-shell"><pre>sudo serivce restart networking</pre></div>
+
+<p>Try to ping the Hertzer host</p>
+
+<div class="highlight highlight-source-shell"><pre>ping 10.20.30.1</pre></div>
+
+<p>If you are able to ping the host then !! It worked, Your Virtual machine is connected to the main host via the network bridge with its own adapter.</p>
+
+<p>You can confirm this by connecting to the new VM with an SSH tunnel through the hertzer host</p>
+
+<div class="highlight highlight-source-shell"><pre>ADDRESSS = 10.20.30.101 OR 10.20.30.102 or 10.20.30.103
+ssh -A -t root@{MAIN_IP} ssh -A -t {VM_USER}@{ADDRESSS}</pre></div>
+
+<p>You will need to first input the hertzer hosts password then your new VMS credential. if everything was setup properly then you should be able to SSH into your new VM.</p>
+
+<p>This model uses the NAT adapter to connect to the internet, But you could remove the NAT adapter and just use the private network and use 10.20.30.1 as the network gateway.</p>
+
+<p>You will need to repeat this for each of the VMs assigning each VM a diffrent IP.</p>
+
+<div class="highlight highlight-source-shell"><pre>node-01 10.20.30.101
+node-02 10.20.30.102
+node-03 10.20.30.103</pre></div>
+
+<p>You now have a 3 node VM cluster connected via a private network that you can ssh into.</p>
+
+<h3>
+<a id="step-four---install-kubernetes" class="anchor" href="#step-four---install-kubernetes" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Step four - Install kubernetes</h3>
+
+<p>Now you will need to install Kuberntees on each of your nodes, So for each VM repeat this process.</p>
+
+<p>Add the kubernetes repo to your sources list</p>
+
+<div class="highlight highlight-source-shell"><pre>vim /etc/apt/sources.list.d/kubernetes.list
+
+deb http://apt.kubernetes.io/ kubernetes-xenial main
+<span class="pl-s"><span class="pl-pds">`</span><span class="pl-pds">`</span></span>
+
+Load <span class="pl-k">in</span> the new repo list
+
+<span class="pl-s"><span class="pl-pds">`</span><span class="pl-pds">`</span><span class="pl-pds">`</span>sh</span>
+<span class="pl-s">apt-get update</span></pre></div>
+
+<p>Install base packages</p>
+
+<div class="highlight highlight-source-shell"><pre>apt-get install -y docker.io kubelet kubeadm kubectl kubernetes-cni</pre></div>
+
+<p>Once these packages are installed we can create our base cluster.</p>
+
+<p>We will use node-01 as the master </p>
+
+<div class="highlight highlight-source-shell"><pre>ssh -A -t root@{MAIN_IP} ssh -A -t {VM_USER}@10.20.30.101</pre></div>
+
+<p>On the master we can used the installed kubeadm tool</p>
+
+<div class="highlight highlight-source-shell"><pre>kubeadm init</pre></div>
+
+<p>This will take several minutes to configure, Once the process finished you will be given a list of detailed that you MUST SAVE.</p>
+
+<div class="highlight highlight-source-shell"><pre>{VM_USER}@node-01:<span class="pl-k">~</span><span class="pl-c"># kubeadm init</span>
+<span class="pl-k">&lt;</span>master/tokens<span class="pl-k">&gt;</span> generated token: <span class="pl-s"><span class="pl-pds">"</span>7fa96f.ddb39492a1874689<span class="pl-pds">"</span></span>
+<span class="pl-k">&lt;</span>master/pki<span class="pl-k">&gt;</span> created keys and certificates <span class="pl-k">in</span> <span class="pl-s"><span class="pl-pds">"</span>/etc/kubernetes/pki<span class="pl-pds">"</span></span>
+<span class="pl-k">&lt;</span>util/kubeconfig<span class="pl-k">&gt;</span> created <span class="pl-s"><span class="pl-pds">"</span>/etc/kubernetes/admin.conf<span class="pl-pds">"</span></span>
+<span class="pl-k">&lt;</span>util/kubeconfig<span class="pl-k">&gt;</span> created <span class="pl-s"><span class="pl-pds">"</span>/etc/kubernetes/kubelet.conf<span class="pl-pds">"</span></span>
+<span class="pl-k">&lt;</span>master/apiclient<span class="pl-k">&gt;</span> created API client configuration
+<span class="pl-k">&lt;</span>master/apiclient<span class="pl-k">&gt;</span> created API client, waiting <span class="pl-k">for</span> the control plane to become ready
+<span class="pl-k">&lt;</span>master/apiclient<span class="pl-k">&gt;</span> all control plane components are healthy after 23.098433 seconds
+<span class="pl-k">&lt;</span>master/apiclient<span class="pl-k">&gt;</span> waiting <span class="pl-k">for</span> at least one node to register and become ready
+<span class="pl-k">&lt;</span>master/apiclient<span class="pl-k">&gt;</span> first node is ready after 10.034029 seconds
+<span class="pl-k">&lt;</span>master/discovery<span class="pl-k">&gt;</span> created essential addon: kube-discovery, waiting <span class="pl-k">for</span> it to become ready
+<span class="pl-k">&lt;</span>master/discovery<span class="pl-k">&gt;</span> kube-discovery is ready after 30.44947 seconds
+<span class="pl-k">&lt;</span>master/addons<span class="pl-k">&gt;</span> created essential addon: kube-proxy
+<span class="pl-k">&lt;</span>master/addons<span class="pl-k">&gt;</span> created essential addon: kube-dns
+
+Kubernetes master initialised successfully<span class="pl-k">!</span>
+
+You can now join any number of machines by running the following on each node:
+
+kubeadm join --token 7fa96f.ddb39492a1874689 10.20.30.1</pre></div>
+
+<p>The most important command is the kubeadm join command, You need to keep this secret if someone get the token and your master IP they will be able to automatically add nodes to your cluster.</p>
+
+<p>Now install the POD network</p>
+
+<div class="highlight highlight-source-shell"><pre>kubectl apply -f https://git.io/weave-kube</pre></div>
+
+<p>Becuase we have a small number of nodes we also want to use our master server as a minion</p>
+
+<div class="highlight highlight-source-shell"><pre>kubectl taint nodes --all dedicated-</pre></div>
+
+<p>Now you are ready to connect your minions nodes to the master, Assuming you have installed the base packes on node-02 and node-3 simply run,</p>
+
+<div class="highlight highlight-source-shell"><pre>kubeadm join --token 7fa96f.ddb39492a1874689 10.20.30.1</pre></div>
+
+<p>This will configure each node.</p>
+
+<p>To check that the nodes are all checked in run,</p>
+
+<div class="highlight highlight-source-shell"><pre>kubectl get nodes
+
+NAME      STATUS    AGE
+node-01   Ready     7h
+node-02   Ready     7h
+node-03   Ready     5h</pre></div>
+
+<p>You should be an output like the one above, Congrats you have a kuberntes cluster.</p>
+
+<h3>
+<a id="step-five---setup-kubectl-on-your-local-machine" class="anchor" href="#step-five---setup-kubectl-on-your-local-machine" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Step five - Setup kubectl on your local machine</h3>
+
+<p>TODO</p>
+
+<div class="highlight highlight-source-shell"><pre>kubectl config set-credentials ubuntu --username={KUBE_USER} --password={KUBE_PASSWORD}
+kubectl config set-cluster personal --server=http://{MAIN_IP}:8080
+kubectl config set-context personal-context --cluster=personal --user=ubuntu
+kubectl config use-context personal-context
+kubectl config <span class="pl-c1">set</span> contexts.personal-context.namespace the-right-prefix
+kubectl config view</pre></div>
+
+      <footer class="site-footer">
+        <span class="site-footer-owner"><a href="https://github.com/stump201/hertzer-proxmox-kubernetes-install-guide">Hertzer-proxmox-kubernetes-install-guide</a> is maintained by <a href="https://github.com/stump201">stump201</a>.</span>
+
+        <span class="site-footer-credits">This page was generated by <a href="https://pages.github.com">GitHub Pages</a> using the <a href="https://github.com/jasonlong/cayman-theme">Cayman theme</a> by <a href="https://twitter.com/jasonlong">Jason Long</a>.</span>
+      </footer>
+
+    </section>
+
+  
+  </body>
+</html>
