@@ -1,4 +1,4 @@
-# Installing Kubernetes on Proxox
+# Installing Kubernetes on Proxmox
 
 For this example i shall be using a dedicated server from Hertzner.https://www.hetzner.de/en/. A shout out to hetzner if your looking for cheap and beefy dedicated hosting then these guys are your best bet.
 
@@ -97,7 +97,7 @@ net.ipv6.conf.all.forwarding=1
 Lastly you will need to ensure we dont send ICPM redirect messages
 
 ```sh
-vim /etc/sysctl.con
+vim /etc/sysctl.conf
 ```
 
 I need to give a shout out to https://blog.no-panic.at/2016/08/09/proxmox-on-debian-at-hetzner-with-multiple-ip-addresses/ this helped me massivly trying to figure this out
@@ -230,7 +230,7 @@ Add the kubernetes repo to your sources list
 vim /etc/apt/sources.list.d/kubernetes.list
 
 deb http://apt.kubernetes.io/ kubernetes-xenial main
-``
+```
 
 Load in the new repo list
 
