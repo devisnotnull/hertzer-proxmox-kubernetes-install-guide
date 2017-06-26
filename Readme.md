@@ -230,7 +230,12 @@ Add the kubernetes repo to your sources list
 vim /etc/apt/sources.list.d/kubernetes.list
 
 deb http://apt.kubernetes.io/ kubernetes-xenial main
-``
+```
+Add public key of "Google Cloud Packages Automatic Signing Key"
+
+```sh
+apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3746C208A7317B0F
+```
 
 Load in the new repo list
 
