@@ -234,7 +234,7 @@ deb http://apt.kubernetes.io/ kubernetes-xenial main
 Add public key of "Google Cloud Packages Automatic Signing Key"
 
 ```sh
-apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3746C208A7317B0F
+curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
 ```
 
 Load in the new repo list
